@@ -26,7 +26,7 @@ const upload = multer({ dest: '/tmp/' });
 // ==========================================
 // 1. CONFIGURATION (API Keys & Details)
 // ==========================================
-const BREVO_API_KEY = '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';
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const SENDER_EMAIL = 'imtiyaz6201260615@gmail.com';
 const SENDER_NAME = 'NB Reels App';
 
