@@ -11,6 +11,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// --- DEBUGGING LOG ---
+app.use((req, res, next) => {
+    console.log("➡️ ACTION AAYA HAI:", req.query.action || req.body.action);
+    next();
+});
+// ---------------------
 
 // File Upload ke liye Multer (Render ke liye safe temporary folder: /tmp/)
 const upload = multer({ dest: '/tmp/' });
