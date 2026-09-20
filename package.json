@@ -7,6 +7,16 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "sib-api-v3-sdk": "^8.5.0",
+    "nodemailer": "^6.9.4",
+    "dotenv": "^16.3.1",
+    "axios": "^1.4.0",
+    "otp-generator": "^4.0.1",
+    "mongoose": "^7.4.1",
+    "firebase": "^10.8.0",
+    "megajs": "^1.2.2"
   }
 }
