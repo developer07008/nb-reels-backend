@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
-const { Storage } = require('megajs');
+const cloudinary = require('cloudinary').v2; // Mega ko hatakar Cloudinary add kiya
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 // --- FULL DEBUGGING LOG ---
 app.use((req, res, next) => {
     console.log("➡️ URL AAYA:", req.url);
@@ -33,33 +34,33 @@ const SENDER_NAME = 'NB Reels App';
 const FIREBASE_DB_URL = 'https://public-real-default-rtdb.firebaseio.com/';
 const FIREBASE_SECRET = 'AIzaSyCB7DDmsWmo6zebhyAgA7hRwL255Y8BMi8';
 
-const mega_accounts = [
-    { email: 'razadanish2098@gmail.com', password: 'Da-94-##' },
-    { email: 'demo2@example.com', password: 'demo_pass_2' },
-    { email: 'demo3@example.com', password: 'demo_pass_3' },
-    { email: 'demo4@example.com', password: 'demo_pass_4' },
-    { email: 'demo5@example.com', password: 'demo_pass_5' },
-    { email: 'demo6@example.com', password: 'demo_pass_6' },
-    { email: 'demo7@example.com', password: 'demo_pass_7' },
-    { email: 'demo8@example.com', password: 'demo_pass_8' },
-    { email: 'demo9@example.com', password: 'demo_pass_9' },
-    { email: 'demo10@example.com', password: 'demo_pass_10' },
-    { email: 'demo11@example.com', password: 'demo_pass_11' },
-    { email: 'demo12@example.com', password: 'demo_pass_12' },
-    { email: 'demo13@example.com', password: 'demo_pass_13' },
-    { email: 'demo14@example.com', password: 'demo_pass_14' },
-    { email: 'demo15@example.com', password: 'demo_pass_15' },
-    { email: 'demo16@example.com', password: 'demo_pass_16' },
-    { email: 'demo17@example.com', password: 'demo_pass_17' },
-    { email: 'demo18@example.com', password: 'demo_pass_18' },
-    { email: 'demo19@example.com', password: 'demo_pass_19' },
-    { email: 'demo20@example.com', password: 'demo_pass_20' }
+// Yahan aapko apne Cloudinary accounts ki details dalni hain
+const cloudinary_accounts = [
+    { cloud_name: 'mediaflows_f2ed0bf1', api_key: 'dl3fkAVqga2vQLb92SHl0Sjol7Q', api_secret: 'yE6VnLHL_hqki-xwKCuen17X_ZY' },
+    { cloud_name: 'demo_cloud_2', api_key: 'demo_key_2', api_secret: 'demo_secret_2' },
+    { cloud_name: 'demo_cloud_3', api_key: 'demo_key_3', api_secret: 'demo_secret_3' },
+    { cloud_name: 'demo_cloud_4', api_key: 'demo_key_4', api_secret: 'demo_secret_4' },
+    { cloud_name: 'demo_cloud_5', api_key: 'demo_key_5', api_secret: 'demo_secret_5' },
+    { cloud_name: 'demo_cloud_6', api_key: 'demo_key_6', api_secret: 'demo_secret_6' },
+    { cloud_name: 'demo_cloud_7', api_key: 'demo_key_7', api_secret: 'demo_secret_7' },
+    { cloud_name: 'demo_cloud_8', api_key: 'demo_key_8', api_secret: 'demo_secret_8' },
+    { cloud_name: 'demo_cloud_9', api_key: 'demo_key_9', api_secret: 'demo_secret_9' },
+    { cloud_name: 'demo_cloud_10', api_key: 'demo_key_10', api_secret: 'demo_secret_10' },
+    { cloud_name: 'demo_cloud_11', api_key: 'demo_key_11', api_secret: 'demo_secret_11' },
+    { cloud_name: 'demo_cloud_12', api_key: 'demo_key_12', api_secret: 'demo_secret_12' },
+    { cloud_name: 'demo_cloud_13', api_key: 'demo_key_13', api_secret: 'demo_secret_13' },
+    { cloud_name: 'demo_cloud_14', api_key: 'demo_key_14', api_secret: 'demo_secret_14' },
+    { cloud_name: 'demo_cloud_15', api_key: 'demo_key_15', api_secret: 'demo_secret_15' },
+    { cloud_name: 'demo_cloud_16', api_key: 'demo_key_16', api_secret: 'demo_secret_16' },
+    { cloud_name: 'demo_cloud_17', api_key: 'demo_key_17', api_secret: 'demo_secret_17' },
+    { cloud_name: 'demo_cloud_18', api_key: 'demo_key_18', api_secret: 'demo_secret_18' },
+    { cloud_name: 'demo_cloud_19', api_key: 'demo_key_19', api_secret: 'demo_secret_19' },
+    { cloud_name: 'demo_cloud_20', api_key: 'demo_key_20', api_secret: 'demo_secret_20' }
 ];
 
 // ==========================================
 // 2. DATABASE SETUP (SQLite)
 // ==========================================
-// Render par error se bachne ke liye database ko bhi /tmp/ mein save kar rahe hain
 const db = new sqlite3.Database('/tmp/server_security.sqlite');
 db.run(`CREATE TABLE IF NOT EXISTS otp_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +70,6 @@ db.run(`CREATE TABLE IF NOT EXISTS otp_requests (
     ip_address TEXT NOT NULL
 )`);
 
-// SQLite Helpers
 const getQuery = (query, params) => new Promise((res, rej) => db.get(query, params, (err, row) => err ? rej(err) : res(row)));
 const runQuery = (query, params) => new Promise((res, rej) => db.run(query, params, function(err) { err ? rej(err) : res(this); }));
 
@@ -154,32 +154,37 @@ app.all('/', upload.any(), async (req, res) => {
                 }
             }
 
-            // --- 3. UPLOAD VIDEO (WITH AUTO-SWITCH) ---
+            // --- 3. UPLOAD VIDEO (CLOUDINARY AUTO-SWITCH) ---
             case 'upload_video': {
                 const videoFile = req.files ? req.files.find(f => f.fieldname === 'video_file') : null;
                 if (!videoFile) return res.json({ status: "error", message: "No video file received." });
 
-                const safeName = Date.now() + '_' + videoFile.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '');
                 let finalVideoUrl = "";
                 let usedAccount = "";
                 let uploadSuccess = false;
 
-                for (let account of mega_accounts) {
+                for (let account of cloudinary_accounts) {
                     try {
-                        const storage = await new Storage({ email: account.email, password: account.password }).ready;
-                        const fileStream = fs.createReadStream(videoFile.path);
+                        // Cloudinary ko har loop mein naye account se connect karna
+                        cloudinary.config({
+                            cloud_name: account.cloud_name,
+                            api_key: account.api_key,
+                            api_secret: account.api_secret,
+                            secure: true
+                        });
+
+                        // Video upload karna
+                        const result = await cloudinary.uploader.upload(videoFile.path, { 
+                            resource_type: "video",
+                            folder: "nb_reels_videos"
+                        });
                         
-                        const uploadedFile = await storage.upload({ 
-                            name: safeName, 
-                            size: videoFile.size 
-                        }, fileStream).complete;
-                        
-                        finalVideoUrl = await uploadedFile.link();
-                        usedAccount = account.email;
+                        finalVideoUrl = result.secure_url; // Yeh direct play hone wala link hai
+                        usedAccount = account.cloud_name;
                         uploadSuccess = true;
                         break; 
                     } catch (err) {
-                        console.error(`Mega Error [${account.email}]:`, err.message);
+                        console.error(`Cloudinary Error [${account.cloud_name}]:`, err.message);
                         continue; 
                     }
                 }
@@ -187,7 +192,7 @@ app.all('/', upload.any(), async (req, res) => {
                 fs.unlinkSync(videoFile.path); 
 
                 if (!uploadSuccess) {
-                    return res.json({ status: "error", message: "All 20 Mega Accounts are full or failed to connect." });
+                    return res.json({ status: "error", message: "All Cloudinary Accounts are full or failed." });
                 }
 
                 const video_id = Date.now().toString();
@@ -206,29 +211,34 @@ app.all('/', upload.any(), async (req, res) => {
                 return res.json({ status: "success", video_id: video_id, message: "Video uploaded successfully." });
             }
 
-            // --- 4. UPLOAD DP (WITH AUTO-SWITCH) ---
+            // --- 4. UPLOAD DP (CLOUDINARY AUTO-SWITCH) ---
             case 'upload_dp': {
                 const dpFile = req.files ? req.files.find(f => f.fieldname === 'dp_file') : null;
                 if (!dpFile) return res.json({ status: "error", message: "No image file received." });
 
-                const safeName = "DP_" + Date.now() + "_" + dpFile.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '');
                 let finalDpUrl = "";
                 let uploadSuccess = false;
 
-                for (let account of mega_accounts) {
+                for (let account of cloudinary_accounts) {
                     try {
-                        const storage = await new Storage({ email: account.email, password: account.password }).ready;
-                        const fileStream = fs.createReadStream(dpFile.path);
+                        cloudinary.config({
+                            cloud_name: account.cloud_name,
+                            api_key: account.api_key,
+                            api_secret: account.api_secret,
+                            secure: true
+                        });
+
+                        // DP upload karna
+                        const result = await cloudinary.uploader.upload(dpFile.path, { 
+                            resource_type: "image",
+                            folder: "nb_reels_dp"
+                        });
                         
-                        const uploadedFile = await storage.upload({ 
-                            name: safeName, 
-                            size: dpFile.size 
-                        }, fileStream).complete;
-                        
-                        finalDpUrl = await uploadedFile.link();
+                        finalDpUrl = result.secure_url;
                         uploadSuccess = true;
                         break;
                     } catch (err) {
+                        console.error(`Cloudinary DP Error [${account.cloud_name}]:`, err.message);
                         continue;
                     }
                 }
@@ -236,7 +246,7 @@ app.all('/', upload.any(), async (req, res) => {
                 fs.unlinkSync(dpFile.path);
 
                 if (!uploadSuccess) {
-                    return res.json({ status: "error", message: "All Mega Accounts are full or failed to connect." });
+                    return res.json({ status: "error", message: "All Cloudinary Accounts are full or failed." });
                 }
 
                 return res.json({ status: "success", dp_url: finalDpUrl, message: "DP uploaded successfully." });
@@ -254,7 +264,7 @@ app.all('/', upload.any(), async (req, res) => {
     }
 });
 
-// Start Server (Render injects PORT automatically)
+// Start Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Node.js server running on port ${PORT}`);
