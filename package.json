@@ -18,6 +18,7 @@
     "mongoose": "^7.4.1",
     "firebase": "^10.8.0",
     "megajs": "^1.2.2",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "sqlite3": "^5.1.7"
   }
 }
