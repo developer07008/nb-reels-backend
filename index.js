@@ -12,8 +12,8 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// File Upload ke liye Multer (Temporary storage folder: uploads/)
-const upload = multer({ dest: 'uploads/' });
+// File Upload ke liye Multer (Render ke liye safe temporary folder: /tmp/)
+const upload = multer({ dest: '/tmp/' });
 
 // ==========================================
 // 1. CONFIGURATION (API Keys & Details)
@@ -51,7 +51,8 @@ const mega_accounts = [
 // ==========================================
 // 2. DATABASE SETUP (SQLite)
 // ==========================================
-const db = new sqlite3.Database('./server_security.sqlite');
+// Render par error se bachne ke liye database ko bhi /tmp/ mein save kar rahe hain
+const db = new sqlite3.Database('/tmp/server_security.sqlite');
 db.run(`CREATE TABLE IF NOT EXISTS otp_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL,
@@ -67,7 +68,6 @@ const runQuery = (query, params) => new Promise((res, rej) => db.run(query, para
 // ==========================================
 // 3. API ROUTING (Single Endpoint)
 // ==========================================
-// app.all() POST aur GET dono requests handle karega (jaise PHP mein tha)
 app.all('/', upload.any(), async (req, res) => {
     const action = req.query.action || req.body.action;
     const ip_address = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
@@ -92,7 +92,6 @@ app.all('/', upload.any(), async (req, res) => {
                 const otp = Math.floor(100000 + Math.random() * 900000).toString();
                 await runQuery(`INSERT INTO otp_requests (email, otp, request_time, ip_address) VALUES (?, ?, ?, ?)`, [email, otp, currentTime, ip_address]);
 
-                // Custom Email Template with Full Company Details
                 const emailTemplate = `
                     <div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 10px; overflow: hidden;'>
                         <div style='background-color: #f9f9f9; padding: 25px;'>
@@ -137,7 +136,7 @@ app.all('/', upload.any(), async (req, res) => {
 
                 if (record) {
                     const currentTime = Math.floor(Date.now() / 1000);
-                    if ((currentTime - record.request_time) > 300) { // 5 minutes validity
+                    if ((currentTime - record.request_time) > 300) { 
                         return res.json({ status: "error", message: "OTP expired." });
                     } else {
                         return res.json({ status: "success", message: "OTP verified successfully." });
@@ -170,20 +169,19 @@ app.all('/', upload.any(), async (req, res) => {
                         finalVideoUrl = await uploadedFile.link();
                         usedAccount = account.email;
                         uploadSuccess = true;
-                        break; // Upload hone par loop stop
+                        break; 
                     } catch (err) {
                         console.error(`Mega Error [${account.email}]:`, err.message);
-                        continue; // Fail hone par agle account par try karega
+                        continue; 
                     }
                 }
 
-                fs.unlinkSync(videoFile.path); // Temp file delete karna storage bachane ke liye
+                fs.unlinkSync(videoFile.path); 
 
                 if (!uploadSuccess) {
                     return res.json({ status: "error", message: "All 20 Mega Accounts are full or failed to connect." });
                 }
 
-                // Firebase par data bhejna (PUT request)
                 const video_id = Date.now().toString();
                 const uploader_uid = req.body.uploader_uid || 'unknown';
 
@@ -236,7 +234,6 @@ app.all('/', upload.any(), async (req, res) => {
                 return res.json({ status: "success", dp_url: finalDpUrl, message: "DP uploaded successfully." });
             }
 
-            // --- 5. DOWNLOAD LOGIC ---
             case 'download_video':
                 return res.json({ status: "error", message: "Download logic not implemented yet." });
 
@@ -249,7 +246,7 @@ app.all('/', upload.any(), async (req, res) => {
     }
 });
 
-// Start Server (Alwaysdata default port set karta hai, warna 3000)
+// Start Server (Render injects PORT automatically)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Node.js server running on port ${PORT}`);
