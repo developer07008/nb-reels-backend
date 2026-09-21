@@ -6,6 +6,7 @@ const cloudinary = require('cloudinary').v2; // Mega ko hatakar Cloudinary add k
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
+const { generateToken04 } = require('zego-server-assistant'); // NEW: ZegoCloud API Token generator
 
 const app = express();
 app.use(cors());
@@ -23,6 +24,29 @@ app.use((req, res, next) => {
 
 // File Upload ke liye Multer (Render ke liye safe temporary folder: /tmp/)
 const upload = multer({ dest: '/tmp/' });
+
+// ==========================================
+// NEW: ZEGOCLOUD TOKEN API (For Live Streaming & Calling)
+// ==========================================
+app.get('/api/zego_token', (req, res) => {
+    const appID = 871581678; // Your Zego AppID
+    const serverSecret = "7cb53ea3a1e87bf816a3ac37d0fa24da"; // Your Zego ServerSecret
+    const userID = req.query.uid;
+    const roomID = req.query.room;
+    
+    if (!userID || !roomID) {
+        return res.status(400).json({ status: 'error', message: 'Missing uid or room parameter' });
+    }
+
+    try {
+        // Generate Token valid for 24 hours (86400 seconds)
+        const token = generateToken04(appID, userID, serverSecret, 86400, '');
+        res.json({ status: 'success', token: token });
+    } catch (error) {
+        console.error("Zego Token Generation Error:", error);
+        res.status(500).json({ status: 'error', message: 'Token generation failed' });
+    }
+});
 
 // ==========================================
 // 1. CONFIGURATION (API Keys & Details)
