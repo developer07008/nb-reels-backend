@@ -2,63 +2,80 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
-const cloudinary = require('cloudinary').v2; // Mega ko hatakar Cloudinary add kiya
+const cloudinary = require('cloudinary').v2; 
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
-const { generateToken04 } = require('zego-server-assistant'); // NEW: ZegoCloud API Token generator
+const crypto = require('crypto'); // Built-in Node.js module for security/hashing
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- FULL DEBUGGING LOG ---
 app.use((req, res, next) => {
     console.log("➡️ URL AAYA:", req.url);
     console.log("➡️ QUERY DATA:", req.query);
     console.log("➡️ BODY DATA:", req.body);
     next();
 });
-//--------------------------
 
-// File Upload ke liye Multer (Render ke liye safe temporary folder: /tmp/)
 const upload = multer({ dest: '/tmp/' });
 
 // ==========================================
-// NEW: ZEGOCLOUD TOKEN API (For Live Streaming & Calling)
+// ZEGOCLOUD TOKEN API (Using Native Node.js Crypto - No external package needed)
 // ==========================================
 app.get('/api/zego_token', (req, res) => {
-    const appID = 871581678; // Your Zego AppID
-    const serverSecret = "7cb53ea3a1e87bf816a3ac37d0fa24da"; // Your Zego ServerSecret
+    const appID = 871581678; 
+    const serverSecret = "7cb53ea3a1e87bf816a3ac37d0fa24da"; 
     const userID = req.query.uid;
     const roomID = req.query.room;
     
-    if (!userID || !roomID) {
-        return res.status(400).json({ status: 'error', message: 'Missing uid or room parameter' });
-    }
+    if (!userID || !roomID) return res.status(400).json({ status: 'error', message: 'Missing parameters.' });
 
     try {
-        // Generate Token valid for 24 hours (86400 seconds)
-        const token = generateToken04(appID, userID, serverSecret, 86400, '');
+        const expireTime = 86400; // 24 hours
+        const currentTime = Math.floor(Date.now() / 1000);
+        const expire = currentTime + expireTime;
+        
+        // Zego token generation algorithm (Token v04)
+        const nonce = crypto.randomBytes(8).readBigInt64BE(0);
+        const payloadObj = { room_id: roomID, privilege: { 1: 1, 2: 1 }, stream_id_list: null };
+        const payload = JSON.stringify(payloadObj);
+        
+        const iv = crypto.randomBytes(16);
+        const secretKey = crypto.createHash('md5').update(serverSecret).digest(); // 16 bytes key
+        
+        const cipher = crypto.createCipheriv('aes-128-cbc', secretKey, iv);
+        let encrypted = cipher.update(payload, 'utf8', 'binary');
+        encrypted += cipher.final('binary');
+        
+        const encryptedBuffer = Buffer.from(encrypted, 'binary');
+        const b1 = Buffer.alloc(8); b1.writeBigInt64BE(BigInt(expire), 0);
+        const b2 = Buffer.alloc(4); b2.writeUInt32BE(iv.length, 0);
+        const b3 = iv;
+        const b4 = Buffer.alloc(2); b4.writeUInt16BE(encryptedBuffer.length, 0);
+        const b5 = encryptedBuffer;
+        
+        const pkg = Buffer.concat([b1, b2, b3, b4, b5]);
+        const token = '04' + pkg.toString('base64');
+
         res.json({ status: 'success', token: token });
     } catch (error) {
         console.error("Zego Token Generation Error:", error);
-        res.status(500).json({ status: 'error', message: 'Token generation failed' });
+        res.status(500).json({ status: 'error', message: 'Failed to connect to Live Server.' });
     }
 });
 
 // ==========================================
-// 1. CONFIGURATION (API Keys & Details)
+// CONFIGURATION
 // ==========================================
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const SENDER_EMAIL = 'imtiyaz6201260615@gmail.com';
 const SENDER_NAME = 'NB Reels App';
-
 const FIREBASE_DB_URL = 'https://public-real-default-rtdb.firebaseio.com/';
 const FIREBASE_SECRET = 'AIzaSyCB7DDmsWmo6zebhyAgA7hRwL255Y8BMi8';
 
-// Yahan aapko apne Cloudinary accounts ki details dalni hain
 const cloudinary_accounts = [
     { cloud_name: 'mediaflows_f2ed0bf1', api_key: 'dl3fkAVqga2vQLb92SHl0Sjol7Q', api_secret: 'yE6VnLHL_hqki-xwKCuen17X_ZY' },
     { cloud_name: 'demo_cloud_2', api_key: 'demo_key_2', api_secret: 'demo_secret_2' },
@@ -83,7 +100,7 @@ const cloudinary_accounts = [
 ];
 
 // ==========================================
-// 2. DATABASE SETUP (SQLite)
+// DATABASE SETUP
 // ==========================================
 const db = new sqlite3.Database('/tmp/server_security.sqlite');
 db.run(`CREATE TABLE IF NOT EXISTS otp_requests (
@@ -98,7 +115,7 @@ const getQuery = (query, params) => new Promise((res, rej) => db.get(query, para
 const runQuery = (query, params) => new Promise((res, rej) => db.run(query, params, function(err) { err ? rej(err) : res(this); }));
 
 // ==========================================
-// 3. API ROUTING (Single Endpoint)
+// API ROUTING
 // ==========================================
 app.all('/', upload.any(), async (req, res) => {
     const action = req.query.action || req.body.action;
@@ -106,20 +123,14 @@ app.all('/', upload.any(), async (req, res) => {
 
     try {
         switch (action) {
-
-            // --- 1. REQUEST OTP ---
             case 'request_otp': {
                 const email = req.body.email;
-                if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-                    return res.json({ status: "error", message: "Invalid Email" });
-                }
+                if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.json({ status: "error", message: "Invalid email address." });
 
                 const lastRequest = await getQuery(`SELECT request_time FROM otp_requests WHERE email = ? ORDER BY request_time DESC LIMIT 1`, [email]);
                 const currentTime = Math.floor(Date.now() / 1000);
 
-                if (lastRequest && (currentTime - lastRequest.request_time) < 60) {
-                    return res.json({ status: "error", message: "Please wait 60 seconds." });
-                }
+                if (lastRequest && (currentTime - lastRequest.request_time) < 60) return res.json({ status: "error", message: "Please wait 60 seconds." });
 
                 const otp = Math.floor(100000 + Math.random() * 900000).toString();
                 await runQuery(`INSERT INTO otp_requests (email, otp, request_time, ip_address) VALUES (?, ?, ?, ?)`, [email, otp, currentTime, ip_address]);
@@ -161,135 +172,70 @@ app.all('/', upload.any(), async (req, res) => {
                 return res.json({ status: "success", message: "OTP sent successfully." });
             }
 
-            // --- 2. VERIFY OTP ---
             case 'verify_otp': {
                 const { email, otp } = req.body;
                 const record = await getQuery(`SELECT * FROM otp_requests WHERE email = ? AND otp = ? ORDER BY request_time DESC LIMIT 1`, [email, otp]);
 
                 if (record) {
                     const currentTime = Math.floor(Date.now() / 1000);
-                    if ((currentTime - record.request_time) > 300) { 
-                        return res.json({ status: "error", message: "OTP expired." });
-                    } else {
-                        return res.json({ status: "success", message: "OTP verified successfully." });
-                    }
+                    if ((currentTime - record.request_time) > 300) return res.json({ status: "error", message: "OTP has expired." });
+                    else return res.json({ status: "success", message: "OTP verified successfully." });
                 } else {
-                    return res.json({ status: "error", message: "Invalid OTP." });
+                    return res.json({ status: "error", message: "Invalid OTP. Please try again." });
                 }
             }
 
-            // --- 3. UPLOAD VIDEO (CLOUDINARY AUTO-SWITCH) ---
             case 'upload_video': {
                 const videoFile = req.files ? req.files.find(f => f.fieldname === 'video_file') : null;
-                if (!videoFile) return res.json({ status: "error", message: "No video file received." });
+                if (!videoFile) return res.json({ status: "error", message: "No video file selected." });
 
-                let finalVideoUrl = "";
-                let usedAccount = "";
-                let uploadSuccess = false;
+                let finalVideoUrl = ""; let usedAccount = ""; let uploadSuccess = false;
 
                 for (let account of cloudinary_accounts) {
                     try {
-                        // Cloudinary ko har loop mein naye account se connect karna
-                        cloudinary.config({
-                            cloud_name: account.cloud_name,
-                            api_key: account.api_key,
-                            api_secret: account.api_secret,
-                            secure: true
-                        });
-
-                        // Video upload karna
-                        const result = await cloudinary.uploader.upload(videoFile.path, { 
-                            resource_type: "video",
-                            folder: "nb_reels_videos"
-                        });
-                        
-                        finalVideoUrl = result.secure_url; // Yeh direct play hone wala link hai
-                        usedAccount = account.cloud_name;
-                        uploadSuccess = true;
-                        break; 
-                    } catch (err) {
-                        console.error(`Cloudinary Error [${account.cloud_name}]:`, err.message);
-                        continue; 
-                    }
+                        cloudinary.config({ cloud_name: account.cloud_name, api_key: account.api_key, api_secret: account.api_secret, secure: true });
+                        const result = await cloudinary.uploader.upload(videoFile.path, { resource_type: "video", folder: "nb_reels_videos" });
+                        finalVideoUrl = result.secure_url; usedAccount = account.cloud_name; uploadSuccess = true; break; 
+                    } catch (err) { continue; }
                 }
-
                 fs.unlinkSync(videoFile.path); 
-
-                if (!uploadSuccess) {
-                    return res.json({ status: "error", message: "All Cloudinary Accounts are full or failed." });
-                }
+                if (!uploadSuccess) return res.json({ status: "error", message: "Server storage full. Please try later." });
 
                 const video_id = Date.now().toString();
                 const uploader_uid = req.body.uploader_uid || 'unknown';
 
-                const videoData = {
-                    video_url: finalVideoUrl,
-                    hosted_on: usedAccount,
-                    uploader_uid: uploader_uid,
-                    metrics: { views: 0, likes: 0, shares: 0, comments: 0, downloads: 0, impressions: 0 },
+                await axios.put(`${FIREBASE_DB_URL}videos/${video_id}.json?auth=${FIREBASE_SECRET}`, {
+                    video_url: finalVideoUrl, hosted_on: usedAccount, uploader_uid: uploader_uid,
+                    metrics: { views: 0, likes: 0, shares: 0, comments: 0 },
                     timestamp: Math.floor(Date.now() / 1000)
-                };
-
-                await axios.put(`${FIREBASE_DB_URL}videos/${video_id}.json?auth=${FIREBASE_SECRET}`, videoData);
-
+                });
                 return res.json({ status: "success", video_id: video_id, message: "Video uploaded successfully." });
             }
 
-            // --- 4. UPLOAD DP (CLOUDINARY AUTO-SWITCH) ---
             case 'upload_dp': {
                 const dpFile = req.files ? req.files.find(f => f.fieldname === 'dp_file') : null;
-                if (!dpFile) return res.json({ status: "error", message: "No image file received." });
+                if (!dpFile) return res.json({ status: "error", message: "No image file selected." });
 
-                let finalDpUrl = "";
-                let uploadSuccess = false;
+                let finalDpUrl = ""; let uploadSuccess = false;
 
                 for (let account of cloudinary_accounts) {
                     try {
-                        cloudinary.config({
-                            cloud_name: account.cloud_name,
-                            api_key: account.api_key,
-                            api_secret: account.api_secret,
-                            secure: true
-                        });
-
-                        // DP upload karna
-                        const result = await cloudinary.uploader.upload(dpFile.path, { 
-                            resource_type: "image",
-                            folder: "nb_reels_dp"
-                        });
-                        
-                        finalDpUrl = result.secure_url;
-                        uploadSuccess = true;
-                        break;
-                    } catch (err) {
-                        console.error(`Cloudinary DP Error [${account.cloud_name}]:`, err.message);
-                        continue;
-                    }
+                        cloudinary.config({ cloud_name: account.cloud_name, api_key: account.api_key, api_secret: account.api_secret, secure: true });
+                        const result = await cloudinary.uploader.upload(dpFile.path, { resource_type: "image", folder: "nb_reels_dp" });
+                        finalDpUrl = result.secure_url; uploadSuccess = true; break;
+                    } catch (err) { continue; }
                 }
-
                 fs.unlinkSync(dpFile.path);
-
-                if (!uploadSuccess) {
-                    return res.json({ status: "error", message: "All Cloudinary Accounts are full or failed." });
-                }
-
-                return res.json({ status: "success", dp_url: finalDpUrl, message: "DP uploaded successfully." });
+                if (!uploadSuccess) return res.json({ status: "error", message: "Server storage full. Please try later." });
+                return res.json({ status: "success", dp_url: finalDpUrl, message: "Profile picture updated." });
             }
 
-            case 'download_video':
-                return res.json({ status: "error", message: "Download logic not implemented yet." });
-
-            default:
-                return res.json({ status: "error", message: "Invalid Action Request." });
+            default: return res.json({ status: "error", message: "Invalid request." });
         }
     } catch (err) {
-        console.error("Server Error:", err);
-        return res.json({ status: "error", message: "Internal Server Error." });
+        return res.json({ status: "error", message: "Network error. Please try again." });
     }
 });
 
-// Start Server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Node.js server running on port ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`Node.js server running on port ${PORT}`); });
