@@ -7,6 +7,7 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto'); // Built-in Node.js module for security/hashing
+const os = require('os'); // NAYA: Server RAM Load check karne ke liye
 
 const app = express();
 app.use(cors());
@@ -23,7 +24,7 @@ app.use((req, res, next) => {
 const upload = multer({ dest: '/tmp/' });
 
 // ==========================================
-// ZEGOCLOUD TOKEN API (Using Native Node.js Crypto - No external package needed)
+// ZEGOCLOUD TOKEN API (Using Native Node.js Crypto)
 // ==========================================
 app.get('/api/zego_token', (req, res) => {
     const appID = 871581678; 
@@ -38,13 +39,12 @@ app.get('/api/zego_token', (req, res) => {
         const currentTime = Math.floor(Date.now() / 1000);
         const expire = currentTime + expireTime;
         
-        // Zego token generation algorithm (Token v04)
         const nonce = crypto.randomBytes(8).readBigInt64BE(0);
         const payloadObj = { room_id: roomID, privilege: { 1: 1, 2: 1 }, stream_id_list: null };
         const payload = JSON.stringify(payloadObj);
         
         const iv = crypto.randomBytes(16);
-        const secretKey = crypto.createHash('md5').update(serverSecret).digest(); // 16 bytes key
+        const secretKey = crypto.createHash('md5').update(serverSecret).digest(); 
         
         const cipher = crypto.createCipheriv('aes-128-cbc', secretKey, iv);
         let encrypted = cipher.update(payload, 'utf8', 'binary');
@@ -123,6 +123,62 @@ app.all('/', upload.any(), async (req, res) => {
 
     try {
         switch (action) {
+
+            // --- NAYA FUNCTION 1: SERVER STATS (Admin Panel Ke Liye) ---
+            case 'server_stats': {
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const usedMem = totalMem - freeMem;
+                const ramUsagePercentage = ((usedMem / totalMem) * 100).toFixed(2);
+                
+                let usedStorageGB = 0;
+                try {
+                    // Firebase se total videos check karke real-time estimated storage
+                    const dbRes = await axios.get(`${FIREBASE_DB_URL}videos.json?shallow=true&auth=${FIREBASE_SECRET}`);
+                    const totalVideos = dbRes.data ? Object.keys(dbRes.data).length : 0;
+                    usedStorageGB = (totalVideos * 5) / 1024; // Average 5MB per video
+                } catch(e) {}
+                
+                const totalStorageGB = 500; // 20 Cloudinary Accs * 25GB
+                const freeStorage = (totalStorageGB - usedStorageGB).toFixed(2);
+
+                return res.json({ 
+                    status: "success", 
+                    ram_usage: `${ramUsagePercentage}%`,
+                    used_mb: (usedMem / 1024 / 1024).toFixed(0),
+                    total_mb: (totalMem / 1024 / 1024).toFixed(0),
+                    storage_gb: freeStorage
+                });
+            }
+
+            // --- NAYA FUNCTION 2: AI CUSTOMER SUPPORT ---
+            case 'ai_support': {
+                const userMessage = req.body.message;
+                if (!userMessage) return res.json({ status: "error", message: "No message." });
+
+                try {
+                    const aiResponse = await axios.post('https://mr4k09.alwaysdata.net/index.php', {
+                        prompt: userMessage,
+                        isImageRequest: false,
+                        imageBase64: null
+                    }, {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer D4K-AIU6WD4D1FEJ'
+                        }
+                    });
+                    
+                    // API ka response nikalna
+                    let aiText = aiResponse.data.response || aiResponse.data.reply || aiResponse.data.answer || (typeof aiResponse.data === 'string' ? aiResponse.data : JSON.stringify(aiResponse.data));
+
+                    return res.json({ status: "success", reply: aiText });
+                } catch (error) {
+                    console.error("AI API Error:", error);
+                    return res.json({ status: "error", message: "AI Server busy hai, baad mein try karein." });
+                }
+            }
+
+            // --- PURANE FUNCTIONS (Bina Kisi Change Ke) ---
             case 'request_otp': {
                 const email = req.body.email;
                 if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.json({ status: "error", message: "Invalid email address." });
